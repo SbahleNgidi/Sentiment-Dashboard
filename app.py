@@ -35,13 +35,14 @@ _KEYBERT_AVAILABLE = load_keyword_extractor()
 st.sidebar.header("Configuration")
 
 # FIXED: Default to a stable model that definitely exists
-# We use the full "Organization/ModelName" format to avoid 404/410 errors
 DEFAULT_MODEL = "distilbert/distilbert-base-uncased-finetuned-sst-2-english"
 
+# We updated the key to 'model_input_v3_fix' to FORCE a reset of the sidebar
 HF_MODEL = st.sidebar.text_input(
     "Hugging Face model",
     value=DEFAULT_MODEL,
-    help="Model ID to call via the HF Inference API."
+    help="Model ID to call via the HF Inference API.",
+    key="model_input_v3_fix"
 )
 
 # Token Logic
@@ -70,23 +71,37 @@ def call_hf_inference(text: str, model: str = HF_MODEL):
     if not HF_TOKEN:
         return {"error": "Missing Token"}
     
-    url = f"{API_URL_BASE}/{model}"
-    try:
-        resp = requests.post(url, headers=HEADERS, json={"inputs": text}, timeout=30)
+    # Internal function to perform the request
+    def _make_request(target_model):
+        url = f"{API_URL_BASE}/{target_model}"
+        try:
+            return requests.post(url, headers=HEADERS, json={"inputs": text}, timeout=30)
+        except Exception as e:
+            return None
+
+    # 1. Try the selected model
+    resp = _make_request(model)
+    
+    # 2. FALLBACK: If the selected model is gone (404/410), try the default one automatically
+    if resp is not None and resp.status_code in [404, 410] and model != DEFAULT_MODEL:
+        st.toast(f"Model '{model}' not found. Falling back to default...")
+        resp = _make_request(DEFAULT_MODEL)
+
+    if resp is None:
+        return {"error": "Connection Failed"}
+
+    # Handle Errors
+    if resp.status_code == 401:
+        return {"error": "401 Unauthorized (Check Token)"}
+    if resp.status_code == 404:
+        return {"error": f"404 Model Not Found: {model}"}
+    if resp.status_code == 410:
+            return {"error": f"410 Model Deleted/Gone: {model}"}
+    if resp.status_code == 503:
+        return {"error": "503 Loading... (Try again in 30s)"}
         
-        if resp.status_code == 401:
-            return {"error": "401 Unauthorized (Check Token)"}
-        if resp.status_code == 404:
-            return {"error": f"404 Model Not Found: {model}"}
-        if resp.status_code == 410:
-             return {"error": "410 Model Deleted/Gone"}
-        if resp.status_code == 503:
-            return {"error": "503 Loading... (Try again in 30s)"}
-            
-        resp.raise_for_status()
-        return resp.json()
-    except Exception as e:
-        return {"error": f"Connection Error: {e}"}
+    resp.raise_for_status()
+    return resp.json()
 
 def parse_hf_response(resp: Any) -> Dict[str, Any]:
     out = {"label": None, "score": None, "raw": resp}
@@ -97,7 +112,7 @@ def parse_hf_response(resp: Any) -> Dict[str, Any]:
         return out
 
     try:
-        # Flatten list if needed (API returns list of lists for some models)
+        # Flatten list if needed
         data = resp
         if isinstance(data, list) and data:
             if isinstance(data[0], list):
@@ -136,7 +151,6 @@ def analyze_and_record(t: str, source: str = "input"):
         "raw": str(parsed["raw"])
     }
     
-    # Keyword extraction (only if library loaded and no error)
     if _KEYBERT_AVAILABLE and "⚠️" not in str(row["label"]):
         try:
             from keybert import KeyBERT 
@@ -164,21 +178,18 @@ with st.expander("Batch / File upload"):
     if uploaded_file and st.button("Analyze uploaded file"):
         content = uploaded_file.read()
         
-        # Parse file type
         lines = []
         if uploaded_file.name.endswith(".txt"):
             lines = content.decode("utf-8", errors="ignore").splitlines()
         else:
             try:
                 df_temp = pd.read_csv(io.BytesIO(content))
-                # Find first text column
                 text_cols = [c for c in df_temp.columns if df_temp[c].dtype == "object"]
                 if text_cols:
                     lines = df_temp[text_cols[0]].dropna().astype(str).tolist()
             except Exception as e:
                 st.error(f"Error reading CSV: {e}")
 
-        # Process lines (limit to 50 for safety)
         if lines:
             progress = st.progress(0)
             limit = 50
@@ -197,7 +208,6 @@ if results:
     st.subheader("Results")
     st.dataframe(df_res)
 
-    # Charts
     valid_df = df_res[df_res["score"].notna()]
     if not valid_df.empty:
         col1, col2 = st.columns(2)

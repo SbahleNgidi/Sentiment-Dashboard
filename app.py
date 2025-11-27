@@ -32,9 +32,12 @@ def load_keyword_extractor():
 _KEYBERT_AVAILABLE = load_keyword_extractor()
 
 # -------- Configuration --------
+# UPDATED: The old model 'cardiffnlp/twitter-roberta-base-sentiment' was deleted (410 Gone).
+# We now use the 'latest' version which is the official replacement.
 HF_MODEL = st.sidebar.text_input(
     "Hugging Face model",
-    value="cardiffnlp/twitter-roberta-base-sentiment",
+    value="cardiffnlp/twitter-roberta-base-sentiment-latest",
+    help="Default model updated to 'latest' version because the old one was deleted."
 )
 
 # --- TOKEN LOGIC (Updated for Cloud) ---
@@ -76,6 +79,8 @@ def call_hf_inference(text: str, model: str = HF_MODEL, headers: Dict[str, str] 
         # Handle specific HTTP errors
         if resp.status_code == 401:
             return {"error": "401 Unauthorized. Check your HF_TOKEN."}
+        if resp.status_code == 404 or resp.status_code == 410:
+             return {"error": f"{resp.status_code} Model not found. Check model ID."}
         if resp.status_code == 503:
             return {"error": "503 Model Loading. Please wait 30s and retry."}
         

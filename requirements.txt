@@ -1,0 +1,13 @@
+streamlit
+pandas
+numpy
+matplotlib
+scikit-learn
+nltk
+keybert
+sentence-transformers
+torch
+transformers
+pyyaml
+protobuf
+altair<5

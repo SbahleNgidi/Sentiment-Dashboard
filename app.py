@@ -32,12 +32,14 @@ def load_keyword_extractor():
 _KEYBERT_AVAILABLE = load_keyword_extractor()
 
 # -------- Configuration --------
-# UPDATED: The old model 'cardiffnlp/twitter-roberta-base-sentiment' was deleted (410 Gone).
-# We now use the 'latest' version which is the official replacement.
+# UPDATED: The previous CardiffNLP models were returning 410 (Gone).
+# Switched to 'distilbert-base-uncased-finetuned-sst-2-english' which is highly stable.
+# Added key="model_id_v2" to force the sidebar to update to this new default.
 HF_MODEL = st.sidebar.text_input(
     "Hugging Face model",
-    value="cardiffnlp/twitter-roberta-base-sentiment-latest",
-    help="Default model updated to 'latest' version because the old one was deleted."
+    value="distilbert-base-uncased-finetuned-sst-2-english",
+    key="model_id_v2",
+    help="Model ID to call via the HF Inference API."
 )
 
 # --- TOKEN LOGIC (Updated for Cloud) ---

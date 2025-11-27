@@ -34,15 +34,20 @@ _KEYBERT_AVAILABLE = load_keyword_extractor()
 # --- 3. Configuration (Sidebar) ---
 st.sidebar.header("Configuration")
 
-# FIXED: Default to a stable model that definitely exists
-DEFAULT_MODEL = "distilbert/distilbert-base-uncased-finetuned-sst-2-english"
+# FIXED: Switched to 'lxyuan' model which is currently very stable on the free tier.
+# We also define backups in case this one fails.
+DEFAULT_MODEL = "lxyuan/distilbert-base-multilingual-cased-sentiments-student"
+BACKUP_MODELS = [
+    "distilbert/distilbert-base-uncased-finetuned-sst-2-english",
+    "cardiffnlp/twitter-roberta-base-sentiment-latest"
+]
 
-# We updated the key to 'model_input_v3_fix' to FORCE a reset of the sidebar
+# Key updated to 'model_input_v4_final' to FORCE a reset of your sidebar
 HF_MODEL = st.sidebar.text_input(
     "Hugging Face model",
     value=DEFAULT_MODEL,
     help="Model ID to call via the HF Inference API.",
-    key="model_input_v3_fix"
+    key="model_input_v4_final" 
 )
 
 # Token Logic
@@ -71,34 +76,40 @@ def call_hf_inference(text: str, model: str = HF_MODEL):
     if not HF_TOKEN:
         return {"error": "Missing Token"}
     
-    # Internal function to perform the request
-    def _make_request(target_model):
+    # Helper to try a specific model
+    def _try_request(target_model):
         url = f"{API_URL_BASE}/{target_model}"
         try:
             return requests.post(url, headers=HEADERS, json={"inputs": text}, timeout=30)
-        except Exception as e:
+        except Exception:
             return None
 
-    # 1. Try the selected model
-    resp = _make_request(model)
+    # 1. Try the user-selected (or default) model
+    resp = _try_request(model)
     
-    # 2. FALLBACK: If the selected model is gone (404/410), try the default one automatically
-    if resp is not None and resp.status_code in [404, 410] and model != DEFAULT_MODEL:
-        st.toast(f"Model '{model}' not found. Falling back to default...")
-        resp = _make_request(DEFAULT_MODEL)
+    # 2. AUTO-FALLBACK: If the model is 404/410/500, try backups automatically
+    if resp is None or resp.status_code in [404, 410, 500, 503]:
+        # Only try backups if we are using the default (to avoid overriding user custom choice)
+        if model == DEFAULT_MODEL:
+            for backup in BACKUP_MODELS:
+                # st.toast is a small popup message
+                st.toast(f"Primary model failed ({resp.status_code if resp else 'Connection'}). Trying backup: {backup}...")
+                resp = _try_request(backup)
+                if resp is not None and resp.status_code == 200:
+                    break
 
     if resp is None:
-        return {"error": "Connection Failed"}
+        return {"error": "Connection Failed (Check Internet)"}
 
-    # Handle Errors
+    # Handle Final Response
     if resp.status_code == 401:
         return {"error": "401 Unauthorized (Check Token)"}
     if resp.status_code == 404:
         return {"error": f"404 Model Not Found: {model}"}
     if resp.status_code == 410:
-            return {"error": f"410 Model Deleted/Gone: {model}"}
+        return {"error": f"410 Model Gone: {model}"}
     if resp.status_code == 503:
-        return {"error": "503 Loading... (Try again in 30s)"}
+        return {"error": "503 Loading... (Wait 30s)"}
         
     resp.raise_for_status()
     return resp.json()
@@ -112,7 +123,7 @@ def parse_hf_response(resp: Any) -> Dict[str, Any]:
         return out
 
     try:
-        # Flatten list if needed
+        # Flatten list if needed (API returns list of lists for some models)
         data = resp
         if isinstance(data, list) and data:
             if isinstance(data[0], list):
@@ -151,6 +162,7 @@ def analyze_and_record(t: str, source: str = "input"):
         "raw": str(parsed["raw"])
     }
     
+    # Keyword extraction (only if library loaded and no error)
     if _KEYBERT_AVAILABLE and "⚠️" not in str(row["label"]):
         try:
             from keybert import KeyBERT 

@@ -11,3 +11,4 @@ transformers
 pyyaml
 protobuf
 altair<5
+requests
